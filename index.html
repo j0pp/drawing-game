@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Socket.IO chat</title>
+    <style>
+      body { background-color: #484848; margin: 0; padding-bottom: 3rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    </style>
+    <!-- CSS only -->
+  </head>
+  <body class="position-relative">
+    <div id="cant-join" hidden>
+      <h1>Game already started or max player count has been reached</h1>
+    </div>
+
+    <div id="name-form" class="position-absolute top-0 start-50 translate-middle-x" display="block" hidden>
+      <h1>Please enter your name</h1>
+      <div>
+        <input id="name-input" type="text" value="Jon">
+        <button id="name-submit">Submit</button>
+      </div>
+    </div>
+
+    <div id="waiting-area" hidden>
+      <h1 id="name"></h1>
+      <h2 id="list-header">List of Players <span id="player-count"></span></h2>
+      <p id="list"></p>
+      <button id="start-game" hidden>Start Game</button>
+    </div>
+
+    <div id="prompt-form" display="block" hidden>
+      <h1>Please enter a funny prompt</h1>
+      <div>
+        <input id="prompt-input" type="text" style="width: 400px" placeholder="Ian Schmid gets home from a long day at work">
+        <button id="prompt-submit">Submit</button>
+      </div>
+    </div>
+
+    <div id="wait-for-judge" hidden>
+      <h1>Please wait while the judge (<span id="judge-name"></span>) writes a funny prompt</h1>
+    </div>
+
+    <div id="wait-for-drawings" hidden>
+      <h1>Please wait while the players draw your prompt:</h1>
+      <p id="judge-prompt"></p>
+    </div>
+    
+    <div id="drawing-area" display="block" hidden>
+      <p>Please draw the following prompt: "<span id="prompt-to-draw"></span>" -<span id="prompt-judge"></span></p>
+      <canvas id="sketchpad" style="background-color: white;"></canvas>
+      <div>
+        <button id="undo">Undo</button>
+        <button id="redo">Redo</button>
+        <input id="color" type="color" value="#000000">
+        <input id="size" type="range" name="size" min="0" max="50" value="10">
+      </div>
+      <button id="submit">Submit drawing</button>
+    </div>
+
+    <div id="round-drawings" hidden>
+
+    </div>
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+    <script src="scripts/sketchpad.js"></script>
+    <!-- JavaScript Bundle with Popper -->
+    <script>
+      var socket = io();
+      let nameEl = document.getElementById('name');
+      let list = document.getElementById('list');
+      let listHeader = document.getElementById('list-header');
+      let submit = document.getElementById('submit');
+
+      let waitForJudge = document.getElementById('wait-for-judge');
+      let judgeNameEl = document.getElementById('judge-name');
+
+      let waitForDrawings = document.getElementById('wait-for-drawings');
+      let judgePrompt = document.getElementById('judge-prompt');
+
+      let drawingArea = document.getElementById('drawing-area');
+      let promptToDraw = document.getElementById('prompt-to-draw');
+      let promptJudge = document.getElementById('prompt-judge');
+
+      let nameForm = document.getElementById('name-form');
+      let nameInput = document.getElementById('name-input');
+      let nameSubmit = document.getElementById('name-submit');
+
+      let promptForm = document.getElementById('prompt-form');
+      let promptInput = document.getElementById('prompt-input');
+      let promptSubmit = document.getElementById('prompt-submit');
+
+      let waitingArea = document.getElementById('waiting-area');
+      let playerCount = document.getElementById('player-count');
+      let startGameBtn = document.getElementById('start-game');
+
+      let roundDrawings = document.getElementById('round-drawings');
+
+      let cantJoin = document.getElementById('cant-join');
+
+      let screens = [cantJoin, nameForm, waitingArea, drawingArea, waitForJudge, waitForDrawings, promptForm, roundDrawings];
+
+      function showScreen(whichScreen) {
+        for (let i = 0; i < screens.length; i++) {
+          let screen = screens[i];
+          if (screen.id == whichScreen.id) {
+            screen.hidden = false;
+          } else {
+            screen.hidden = true;
+          }
+        }
+      }
+
+      let sketchpad = new Sketchpad({
+        element: '#sketchpad',
+        width: 300,
+        height: 300,
+      });
+      let undo = document.getElementById('undo');
+      undo.onclick = () => {
+        sketchpad.undo();
+      }
+      let redo = document.getElementById('redo');
+      redo.onclick = () => {
+        sketchpad.redo();
+      }
+
+      let colorPicker = document.getElementById('color');
+      colorPicker.addEventListener("change", watchColorPicker, false);
+
+      function watchColorPicker(event) {
+        sketchpad.color = event.target.value;
+      }
+
+      let size = document.getElementById('size');
+      size.addEventListener("change", watchSizeInput, false);
+
+      function watchSizeInput(event) {
+        sketchpad.penSize = event.target.value;
+      }
+
+      socket.on('already started', () => {
+        showScreen(cantJoin);
+      });
+      socket.on('allow join', () => {
+        showScreen(nameForm);
+        nameSubmit.onclick = () => {
+          if (nameInput.value == '') {
+            alert('Please enter a value for your username');
+          } else {
+            let name = nameInput.value;
+            socket.emit('submit name', name);
+            nameEl.innerText = name;
+            showScreen(waitingArea);
+            socket.on('player list update', (players, maxPlayers) => {
+              let x = '';
+              for (let i = 0; i < players.length; i++) {
+                x += ' ' + players[i].name + '\n';
+              }
+              list.innerText = x;
+              playerCount.innerText = '(' + players.length + '/' + maxPlayers + ')';
+            });
+            socket.on('host', () => {
+              startGameBtn.onclick = () => {
+                socket.emit('start game');
+              }
+              startGameBtn.hidden = false;
+            });
+          }
+        }
+      });
+      socket.on('wait for judge', (judgeName) => {
+        judgeNameEl.innerText = judgeName;
+        showScreen(waitForJudge);
+      });
+      socket.on('judge prompt', () => {
+        showScreen(promptForm);
+        promptSubmit.onclick = () => {
+          if (promptInput.value == '') {
+            alert('Please don\'t leave the prompt field blank');
+          } else {
+            socket.emit('submit prompt', promptInput.value);
+          }
+        }
+      });
+      socket.on('wait for drawings', (prompt) => {
+        judgePrompt.innerText = prompt;
+        showScreen(waitForDrawings);
+      });
+      socket.on('start round', (judge, prompt) => {
+        promptToDraw.innerText = prompt;
+        promptJudge.innerText = judge.name;
+        showScreen(drawingArea);
+        submit.onclick = () => {
+          socket.emit('submit drawing', sketchpad.toObject());
+          drawingArea.hidden = true;
+        }
+      });
+      socket.on('start judgement', (round) => {
+        showScreen(roundDrawings);
+        let prompt = document.createElement('h1');
+        prompt.innerText = round.prompt;
+        if (socket.id == round.judge.id) {
+          let header = document.createElement('h2');
+          header.innerText = 'Please select the drawing that you most like';
+          roundDrawings.appendChild(header);
+        }
+        
+        for (const [key, value] of Object.entries(round.drawings)) {
+          let sketchpadEl = document.createElement('canvas');
+          sketchpadEl.setAttribute('id', key);
+          sketchpadEl.style.backgroundColor = 'white';
+          sketchpadEl.style.margin = '15px';
+          roundDrawings.appendChild(sketchpadEl);
+          let drawing = value;
+          drawing.element = '#' + key;
+          drawing.readOnly = true;
+          let sketchpad = new Sketchpad(drawing);
+          sketchpad.animate(10);
+          sketchpadEl.style.cursor = 'default';
+          if (socket.id == round.judge.id) {
+            sketchpadEl.onclick = () => {
+              socket.emit('choose winner', key);
+
+            };
+          }
+        }
+      });
+
+      socket.on('winner chosen', (winner) => {
+        let result = document.createElement('h3');
+        result.innerText = 'Sorry, you did not win this round.';
+        if (winner.id == socket.id) {
+          result.innerText = 'Congrats! You won this round!';
+        }
+        for (let i = 0; i < roundDrawings.children.length; i++) {
+          let canvas = roundDrawings.children[i];
+          if (canvas.id != winner.id) {
+            canvas.hidden = true;
+          }
+        }
+        let winnerEl = document.createElement('h3');
+        winnerEl.innerText = 'Winner:';
+        roundDrawings.prepend(winnerEl);
+        roundDrawings.appendChild(result);
+      });
+      
+    </script>
+  </body>
+</html>
